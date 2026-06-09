@@ -1,0 +1,68 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-pip build-essential git \
+          libssl-dev libffi-dev \
+          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+          libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev \
+          libgstreamer1.0-dev gstreamer1.0-plugins-base \
+          openjdk-17-jdk unzip wget
+
+    - name: Install buildozer and dependencies
+      run: |
+        pip install buildozer cython==0.29.36 virtualenv
+
+    - name: Cache Android SDK and NDK
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.buildozer/android/platform
+          ~/.buildozer/android/crystax-ndk
+        key: android-sdk-ndk-${{ hashFiles('buildozer.spec') }}
+        restore-keys: android-sdk-ndk-
+
+    - name: Build APK
+      run: |
+        buildozer -v android debug 2>&1 | tee build.log
+      env:
+        BUILDOZER_WARN_ON_ROOT: 0
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: island-adventures-apk
+        path: |
+          bin/*.apk
+          build.log
+        retention-days: 30
+
+    - name: Show build result
+      if: always()
+      run: |
+        echo "=== APK files ==="
+        find bin/ -name "*.apk" 2>/dev/null || echo "No APK found"
+        echo "=== Build log (last 50 lines) ==="
+        tail -50 build.log 2>/dev/null || echo "No log"
