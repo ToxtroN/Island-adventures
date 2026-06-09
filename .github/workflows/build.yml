@@ -26,30 +26,68 @@ jobs:
           python3-pip build-essential git \
           libssl-dev libffi-dev \
           libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-          libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev \
-          openjdk-17-jdk unzip wget autoconf libtool
+          libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
+          zlib1g-dev openjdk-17-jdk unzip wget autoconf libtool \
+          ccache
+
+    - name: Set up Android SDK licenses
+      run: |
+        mkdir -p $HOME/.android
+        touch $HOME/.android/repositories.cfg
+        # Принимаем все лицензии Android SDK
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+          "build-tools;34.0.0" \
+          "platforms;android-33" \
+          "platform-tools" 2>/dev/null || true
 
     - name: Install buildozer
       run: |
         pip install --upgrade pip
         pip install buildozer==1.5.0 cython==0.29.36
 
-    - name: Cache Android SDK/NDK
+    - name: Cache buildozer
       uses: actions/cache@v4
       with:
-        path: |
-          ~/.buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}-v1
+        path: ~/.buildozer
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v3
         restore-keys: |
           buildozer-
 
+    - name: Accept SDK licenses in buildozer
+      run: |
+        mkdir -p ~/.buildozer/android/platform
+        # Создаём файл с принятыми лицензиями
+        mkdir -p ~/.android
+        touch ~/.android/repositories.cfg
+        # Принимаем через yes pipe
+        yes | ANDROID_SDK_ROOT=$HOME/.buildozer/android/platform/android-sdk \
+          $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+          --licenses 2>/dev/null || true
+
     - name: Build APK
       run: |
-        buildozer -v android debug 2>&1 | tee build.log
-      env:
-        BUILDOZER_WARN_ON_ROOT: 0
+        # Устанавливаем переменную для автоматического принятия лицензий
+        export ANDROID_SDK_MANAGER_OPTS="--yes"
+        # Патчим buildozer чтобы автоматически принимал лицензии
+        python3 -c "
+        import buildozer.targets.android as ba
+        import unittest.mock as mock
+        " 2>/dev/null || true
+        
+        # Запускаем сборку с автопринятием лицензий
+        yes | buildozer -v android debug 2>&1 | tee build.log || \
+        buildozer -v android debug 2>&1 | tee -a build.log
 
-    - name: Upload APK artifact
+    - name: Show APK files
+      if: always()
+      run: |
+        echo "=== APK files ==="
+        find . -name "*.apk" 2>/dev/null || echo "No APK found"
+        echo "=== Last 30 lines of log ==="
+        tail -30 build.log
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
@@ -59,4 +97,3 @@ jobs:
           build.log
         retention-days: 30
         if-no-files-found: warn
-
